@@ -1,1 +1,1 @@
-# FinMind-Talk.-Plan.-Invest.-Smarter.
+# FinMind: Talk. Plan. Invest. Smarter.
