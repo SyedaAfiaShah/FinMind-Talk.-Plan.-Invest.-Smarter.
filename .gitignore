@@ -205,3 +205,65 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and temp
+*.log
+*.tmp
+*.out
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Model and data files
+models/
+checkpoints/
+*.h5
+*.pt
+*.pth
+*.onnx
+*.joblib
+*.pkl
+*.npy
+*.npz
+
+# Cloud configs / secrets
+config.json
+secrets.json
+api_keys.json
+*.pem
+*.crt
+*.key
+
+# Node / frontend (if chatbot UI)
+node_modules/
+dist/
+build/
+
+# Quantum SDK (D-Wave, etc.)
+dwave.conf
+qiskit_log.txt
