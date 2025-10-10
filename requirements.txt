@@ -1,6 +1,5 @@
-streamlit==1.29.0
-pandas==1.6.2
-numpy==1.25.0
-pypfopt==1.5.0
-dimod==0.13.0
-dwave-ocean-sdk==3.3.0
+streamlit
+pandas
+numpy
+pypfopt
+dwave-ocean-sdk
