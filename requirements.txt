@@ -1,0 +1,8 @@
+streamlit
+pandas
+numpy
+pypfopt
+
+Dimod is part of D-Wave Ocean SDK, but listing core components helps
+dimod
+dwave-ocean-sdk
