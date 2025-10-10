@@ -108,7 +108,7 @@ def process_user_input(user_input, mode, max_assets):
     processing_msg = f"*{mode.capitalize()} engine is running... (AI filtering {max_assets} stocks).* " \
                      f"Please wait (simulated latency added for realism)."
     st.session_state.chat_history.append({"role": "system", "content": processing_msg})
-    time.sleep(2)  # simulate latency
+
 
     try:
         # Generate mock AI output
@@ -121,18 +121,24 @@ def process_user_input(user_input, mode, max_assets):
             result = quantum_portfolio_allocation_local(ai_output, total_budget, max_assets)
             engine_name = "Quantum (QUBO / Simulated Annealing)"
 
-        # Format final results
+       
         final_allocations_list = []
-        for ticker, amount in result["allocation"].items():
-            ai_data = next((item for item in ai_output if item["ticker"] == ticker), {})
-            final_allocations_list.append({
-                "ticker": ticker,
-                "amount": amount,
-                "weight": amount / total_budget,
-                "predicted_return": ai_data.get("predicted_return", 0),
-                "volatility": ai_data.get("volatility", 0),
-                "ai_score": ai_data.get("score", 0),
-            })
+        if result.get("allocation"):  # <-- ensure allocation exists
+            for ticker, amount in result["allocation"].items():
+                ai_data = next((item for item in ai_output if item["ticker"] == ticker), {})
+                final_allocations_list.append({
+            "ticker": ticker,
+            "amount": amount,
+            "weight": amount / total_budget,
+            "predicted_return": ai_data.get("predicted_return", 0),
+            "volatility": ai_data.get("volatility", 0),
+            "ai_score": ai_data.get("score", 0),
+        })
+        else:
+            st.session_state.chat_history.append({
+        "role": "system",
+        "content": "⚠️ No allocation could be computed. Please try adjusting your budget or asset selection."
+    })
 
         st.session_state.results = {
             "engine": engine_name,
@@ -179,12 +185,19 @@ with col2:
     else:
         st.info("Results will appear here after analysis.")
 
-# Input Form
 with st.form("chat_form", clear_on_submit=True):
-    user_input = st.text_input("Ask about your budget:", key='user_input_key', placeholder="I have $5000 to invest.")
+    user_input = st.text_input(
+        "Ask about your budget:", 
+        key='user_input_key', 
+        placeholder="I have $5000 to invest."
+    )
     submitted = st.form_submit_button("Analyze & Optimize")
+    
     if submitted and user_input:
         process_user_input(user_input, engine_mode, max_assets)
+        
+        # --- Optional: Explicitly clear user_input after submission ---
+        st.session_state.user_input_key = ""
 
 # Hackathon Note
 st.markdown("---")
