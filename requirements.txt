@@ -1,8 +1,8 @@
-streamlit
-pandas
-numpy
-pypfopt
+streamlit==1.29.0
+pandas==2.1.1
+numpy==1.26.0
+pypfopt==1.4.4
 
-Dimod is part of D-Wave Ocean SDK, but listing core components helps
-dimod
-dwave-ocean-sdk
+# Dimod is part of D-Wave Ocean SDK, but listing core components helps
+dimod==0.13.0
+dwave-ocean-sdk==3.3.0
