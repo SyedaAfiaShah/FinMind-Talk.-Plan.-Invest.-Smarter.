@@ -5,16 +5,29 @@ from dimod import BinaryQuadraticModel, SimulatedAnnealingSampler
 
 def calculate_quantum_metrics(weights, mu, ai_output, budget, total_return):
     """Calculates financial metrics for the portfolio selected by the quantum model."""
-    
-    # Calculate portfolio volatility (We use the simple mean volatility of selected assets 
-    # since the QUBO formulation simplifies covariance for tractability)
+
+    # Detect tickers in ai_output entries: items may have 'ticker' or 'Ticker'
     selected_tickers = list(weights.keys())
-    selected_volatilities = [
-        item['volatility'] for item in ai_output if item['ticker'] in selected_tickers
-    ]
+
+    selected_volatilities = []
+    for tick in selected_tickers:
+        vol = None
+        for item in ai_output:
+            # robust matching for 'ticker' or 'Ticker'
+            if ('ticker' in item and item['ticker'] == tick) or ('Ticker' in item and item['Ticker'] == tick):
+                vol_key = 'volatility' if 'volatility' in item else 'Volatility' if 'Volatility' in item else None
+                if vol_key:
+                    vol = item[vol_key]
+                break
+        # if not found, fallback to a small volatility to avoid divide by zero
+        if vol is None:
+            vol = 0.01
+        selected_volatilities.append(vol)
+
     # Simple portfolio volatility proxy: weighted average volatility
-    expected_volatility = np.average(selected_volatilities, weights=[weights[t]/budget for t in selected_tickers])
-    
+    weights_frac = [weights[t] / budget for t in selected_tickers] if budget > 0 else [1/len(selected_tickers)]*len(selected_tickers)
+    expected_volatility = np.average(selected_volatilities, weights=weights_frac)
+
     # Calculate Sharpe Ratio
     sharpe_ratio = total_return / expected_volatility if expected_volatility > 0 else 0
 
@@ -29,101 +42,86 @@ def calculate_quantum_metrics(weights, mu, ai_output, budget, total_return):
 
 def quantum_portfolio_allocation_local(ai_output: list, budget: float, max_assets: int):
     """
-    Formulates the portfolio selection problem as a QUBO and solves it using 
-    D-Wave's local Simulated Annealer (proxy for Quantum Annealer).
-
-    Inputs:
-        ai_output (list): List of dicts with ticker, predicted_return, volatility, ai_score.
-        budget (float): Total investment budget.
-        max_assets (int): K, the hard constraint on the number of assets to select (Cardinality).
-        
-    Output:
-        A dictionary containing allocation and performance metrics.
+    Formulates the portfolio selection problem as a QUBO and solves it using
+    a Simulated Annealer.
     """
-    
+
     start_time = time.time()
-    
+
+    # Internal scaling to avoid instability for tiny demo budgets
+    effective_budget = budget
+    DEMO_INTERNAL_MIN = 1000.0
+    use_internal_scaling = False
+    if budget < DEMO_INTERNAL_MIN:
+        effective_budget = DEMO_INTERNAL_MIN
+        use_internal_scaling = True
+
     df = pd.DataFrame(ai_output)
+    # allow either 'ticker' or 'Ticker' column
+    if 'ticker' not in df.columns and 'Ticker' in df.columns:
+        df = df.rename(columns={'Ticker': 'ticker'})
     tickers = df['ticker'].tolist()
     num_stocks = len(tickers)
-    
-    # --- QUBO PARAMETERS ---
-    # Convert returns to a series and create a simple volatility matrix for coupling terms
+
     mu = df['predicted_return'].values
     sigma = df['volatility'].values
-    
-    # A (Risk-Aversion Parameter): Controls the balance between risk and return.
-    # Higher A means more risk aversion. We set it high to favor low risk.
-    A = 5.0 
-    
-    # P (Penalty Parameter): Controls how strictly the constraint is enforced.
-    # Must be larger than A * max_return * max_volatility^2 to dominate
-    P = 10.0 
-    
-    # Initialize Binary Quadratic Model (BQM)
+
+    A = 5.0
+    P = 10.0
+
     bqm = BinaryQuadraticModel('BINARY')
 
-    # --- 1. Objective Function (Minimize Risk - Maximize Return) ---
-    # We want to MINIMIZE H = A * Risk - Return
-    
-    # Risk (Quadratic Term): Simple interaction based on volatilities (Proxy for covariance)
+    # Risk quadratic terms
     for i in range(num_stocks):
         for j in range(i + 1, num_stocks):
-            # Q[i, j] = A * sigma_i * sigma_j
             bqm.add_interaction(i, j, A * sigma[i] * sigma[j])
-            
-    # Return (Linear Term): We negate returns because QUBO solves minimization problems
-    for i in range(num_stocks):
-        # Q[i, i] = -mu_i
-        bqm.add_variable(i, -mu[i])
-        
-    # --- 2. Cardinality Constraint (Select Exactly K Assets) ---
-    # H_constraint = P * (Sum(x_i) - K)^2
-    # Expanding this results in linear and quadratic terms added to the BQM.
-    
-    # The linear term correction: -2*P*K*x_i
-    for i in range(num_stocks):
-        bqm.add_variable(i, -2 * P * max_assets * bqm.linear[i])
 
-    # The quadratic term: P * x_i * x_j (for all i != j)
+    # Return linear terms
+    for i in range(num_stocks):
+        bqm.add_variable(i, -mu[i])
+
+    # Cardinality constraint linear correction
+    for i in range(num_stocks):
+        # add -2*P*K times the existing linear term (which is -mu[i])
+        linear_coeff = bqm.linear.get(i, 0.0)
+        bqm.add_variable(i, -2 * P * max_assets * linear_coeff)
+
+    # Cardinality quadratic terms
     for i in range(num_stocks):
         for j in range(i + 1, num_stocks):
             bqm.add_interaction(i, j, P)
 
-    # --- 3. Solve QUBO via Simulated Annealing (Hackathon Proxy) ---
     sampler = SimulatedAnnealingSampler()
-    sampleset = sampler.sample(bqm, num_reads=100) # Run 100 times for best result
-    
-    best_solution = sampleset.first.sample
-    
-    # --- 4. Post-Processing: Map Binary Result to Dollar Allocation ---
-    selected_stocks = [tickers[i] for i, v in best_solution.items() if v == 1]
-    
-    # Fallback to equal weighting if constraint failure leads to zero selection
-    if not selected_stocks:
-        selected_stocks = [tickers[np.argmax(mu)]] # Select best predicted stock as last resort
+    sampleset = sampler.sample(bqm, num_reads=100)
 
-    # Final Allocation Logic: Proportional weighting based on Predicted Return (AI Signal)
-    # This ensures the quantum selection uses the AI's risk/return profile for weighting.
+    best_solution = sampleset.first.sample
+
+    selected_stocks = [tickers[i] for i, v in best_solution.items() if v == 1]
+
+    if not selected_stocks:
+        selected_stocks = [tickers[np.argmax(mu)]]
+
     selected_df = df[df['ticker'].isin(selected_stocks)].copy()
-    
-    # Calculate weights proportional to predicted return
+
     total_selected_return = selected_df['predicted_return'].sum()
     if total_selected_return > 0:
         selected_df['weight'] = selected_df['predicted_return'] / total_selected_return
     else:
-        # If returns are all negative/zero, fall back to equal weighting among selected assets
         selected_df['weight'] = 1 / len(selected_stocks)
-        
-    # Convert weights to dollar amounts
-    selected_df['amount'] = selected_df['weight'] * budget
-    
+
+    # Use effective_budget for stable internal amounts, then scale back if needed
+    selected_df['amount_internal'] = selected_df['weight'] * effective_budget
+
+    if use_internal_scaling and effective_budget != 0:
+        scale_factor = budget / effective_budget
+        selected_df['amount'] = selected_df['amount_internal'] * scale_factor
+    else:
+        selected_df['amount'] = selected_df['amount_internal']
+
     dollar_allocation = {row['ticker']: round(row['amount'], 2) for index, row in selected_df.iterrows()}
-    
-    # Calculate Total Portfolio Return (for metrics display)
+
     total_portfolio_return = np.dot(selected_df['weight'].values, selected_df['predicted_return'].values)
 
-    # 5. Calculate Final Performance Metrics
     performance = calculate_quantum_metrics(
         dollar_allocation, mu, ai_output, budget, total_portfolio_return
     )
