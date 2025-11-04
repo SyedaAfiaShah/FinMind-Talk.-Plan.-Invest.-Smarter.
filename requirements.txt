@@ -1,6 +1,6 @@
-streamlit
+gradio
 pandas
 numpy
-pypfopt
+PyPortfolioOpt
 dwave-ocean-sdk
 matplotlib
